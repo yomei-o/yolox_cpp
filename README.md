@@ -10,12 +10,14 @@ YOLOX is the most different of the family: **anchor-free with a decoupled head**
 **SimOTA** dynamic label assignment (no anchors, no DFL/TAL). See
 [`pure/NOTES_yolox.md`](pure/NOTES_yolox.md) for the full architecture blueprint.
 
-## Status (WIP)
-- ✅ M0: oracle (`torch.hub` yolox-tiny) + architecture blueprint + **Focus op** (the only
-  new primitive; space-to-depth stem), gradient-checked.
-- ⏳ M1: full forward parity vs PyTorch (`net_yolox.hpp` + `export_yolox.py`).
-- ⏳ M2: loss — SimOTA (plain, no-grad) + IoU/BCE (forward + backward) vs PyTorch.
-- ⏳ M3: training loop; then GPU via the `bk::` seam.
+## Status
+- ✅ M0: oracle (`torch.hub` yolox-tiny) + architecture blueprint + **Focus op** (space-to-depth), gradient-checked.
+- ✅ M1: full forward parity vs PyTorch (`net_yolox.hpp` + `export_yolox.py`) — L0 1.8e-4 / L1 4e-5 / L2 1.9e-5.
+- ✅ M2: loss — **SimOTA** (plain, no-grad) == YOLOX `get_assignments`; IoU/BCE forward 1.9e-6, **grads 3e-8** vs PyTorch.
+- ✅ M3: **end-to-end training** (`m3_train.cpp`, forward→SimOTA→loss→backward→SGD) — loss 24.1→3.2.
+
+conv routes through the single-header `bk::` device seam, so `nvcc -DUSE_CUDA` trains on a
+real GPU (verified for the sibling repos on a Colab T4).
 
 ## Build (engine self-test, no deps)
 ```sh

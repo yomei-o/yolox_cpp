@@ -74,7 +74,9 @@ per grid cell (gx,gy) at stride s:
     = onehot*pred_iou detached; forward value identical to YOLOX get_losses).
   - loss formulas: IoU loss = 1-iou², cost = clsBCE + 3·(-log iou) + 1e6·(~center1.5),
     dynamic-k = int(sum(top10 iou)), reg_weight=5. bboxes_iou/IOUloss use cxcywh.
-- M3 training loop; then backend seam already present → nvcc GPU build (Colab)
+- M3 training loop  — ✅ done. `m3_train.cpp`: forward→SimOTA→loss→backward→SGD,
+  loss 24.1→3.2 on a synthetic batch. conv routes through the `bk::` seam so a
+  `nvcc -DUSE_CUDA` build trains on GPU (same as v5/v8/v11).
 
 ## Gotchas to remember
 - export must **force CPU** (`.cpu()`) — torch.hub loads to GPU on GPU hosts (learned on v5).
