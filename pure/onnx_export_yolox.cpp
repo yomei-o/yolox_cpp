@@ -9,7 +9,7 @@ using namespace onx;
 int main() {
   const std::string D = "pure/ref/data_net/";
   auto prov = load_net(D);
-  int64_t IMG; { std::ifstream f(D+"io.txt"); f >> IMG; }
+  int64_t IMG, BD; { std::ifstream f(D+"io.txt"); f >> IMG >> BD; }
   const int64_t NC = 80, RM = 16;   // yolox reg=4 raw (no DFL); 85 = 4+1+80
 
   Graph g; g.opset = 13;
@@ -83,20 +83,20 @@ int main() {
 
   // topology (mirror net_yolox.hpp)
   std::string x = conv(focus("images"));
-  x = conv(x); x = csp(x,1,true);
-  x = conv(x); std::string c3 = csp(x,3,true);
-  x = conv(c3); std::string c4 = csp(x,3,true);
-  x = conv(c4); x = spp(x); std::string c5 = csp(x,1,false);
+  x = conv(x); x = csp(x,BD,true);
+  x = conv(x); std::string c3 = csp(x,3*BD,true);
+  x = conv(c3); std::string c4 = csp(x,3*BD,true);
+  x = conv(c4); x = spp(x); std::string c5 = csp(x,BD,false);
   std::string fpn0 = conv(c5);
   std::string u = resize2x(fpn0);
-  std::string p4 = csp(concat({u,c4}),1,false);
+  std::string p4 = csp(concat({u,c4}),BD,false);
   std::string red = conv(p4);
   std::string u2 = resize2x(red);
-  std::string pan2 = csp(concat({u2,c3}),1,false);
+  std::string pan2 = csp(concat({u2,c3}),BD,false);
   std::string d0 = conv(pan2);
-  std::string pan1 = csp(concat({d0,red}),1,false);
+  std::string pan1 = csp(concat({d0,red}),BD,false);
   std::string d1 = conv(pan1);
-  std::string pan0 = csp(concat({d1,fpn0}),1,false);
+  std::string pan0 = csp(concat({d1,fpn0}),BD,false);
   std::string pans[3] = {pan2, pan1, pan0};
   for (int i=0;i<3;++i) {
     std::string st=conv(pans[i]);

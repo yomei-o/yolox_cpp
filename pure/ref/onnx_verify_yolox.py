@@ -2,7 +2,7 @@
 import os, numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); D = os.path.join(HERE, "data_net")
 import onnxruntime as ort
-IMG = int(open(os.path.join(D, "io.txt")).readline())
+IMG = int(open(os.path.join(D, "io.txt")).readline().split()[0])
 x = np.fromfile(os.path.join(D, "x.bin"), np.float32).reshape(1, 3, IMG, IMG)
 sess = ort.InferenceSession(os.path.join(HERE, "..", "..", "yolox_tiny.onnx"), providers=["CPUExecutionProvider"])
 outs = sess.run(None, {"images": x})
