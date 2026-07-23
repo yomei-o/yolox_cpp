@@ -33,17 +33,24 @@ for _mm in mods:
     _flat += [_mm.dconv, _mm.pconv] if hasattr(_mm, "dconv") else [_mm]
 mods = _flat
 def save(n, t): t.detach().contiguous().float().cpu().numpy().tofile(os.path.join(D, n))
+qn = {id(mm): nm for nm, mm in m.named_modules()}   # module -> state_dict prefix
 lines = [str(len(mods))]
+names = []            # state_dict KEY per emitted tensor, in engine (mods) order, so the
+                      # pure-C++ checkpointer can pair by NAME (load_state_dict matches key).
 for i, mod in enumerate(mods):
+    p = qn[id(mod)]
     if hasattr(mod, "bn"):        # BaseConv: conv(no bias)+BN+SiLU
         c, b = mod.conv, mod.bn
         save(f"cw{i}.bin", c.weight); save(f"bg{i}.bin", b.weight); save(f"bb{i}.bin", b.bias)
         save(f"rm{i}.bin", b.running_mean); save(f"rv{i}.bin", b.running_var)
+        names += [f"{p}.conv.weight", f"{p}.bn.weight", f"{p}.bn.bias", f"{p}.bn.running_mean", f"{p}.bn.running_var"]
         lines.append(f"1 {c.weight.shape[0]} {c.weight.shape[1]} {c.kernel_size[0]} {c.stride[0]} {b.eps} {c.groups}")
     else:                         # plain Conv2d (bias)
         save(f"cw{i}.bin", mod.weight); save(f"cb{i}.bin", mod.bias)
+        names += [f"{p}.weight", f"{p}.bias"]
         lines.append(f"0 {mod.weight.shape[0]} {mod.weight.shape[1]} {mod.kernel_size[0]} {mod.stride[0]} 0 {mod.groups}")
 open(os.path.join(D, "manifest_unfused.txt"), "w").write("\n".join(lines) + "\n")
+open(os.path.join(D, "names.txt"), "w").write("\n".join(names) + "\n")
 
 # reference forward (BN eval == unfused C++ with training=false)
 x = torch.randn(1, 3, IMG, IMG).cpu()
