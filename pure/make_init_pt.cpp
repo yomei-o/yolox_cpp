@@ -5,10 +5,12 @@
 // writer. The result loads into the YOLOX reference model (load_state_dict) and is
 // trainable by train_cli.
 //   build: cl /std:c++20 /O2 /EHsc pure/make_init_pt.cpp   (or via cc11.sh)
-//   run:   make_init_pt [out.pt] [rand|from] [pretrained.pth]
+//   run:   make_init_pt [out.pt] [rand|from] [pretrained.pth] [arch_dir]
 //     rand (default): He/Kaiming random init from the manifest — fully self-contained.
 //     from : copy values from a pretrained .pth read in C++ by ptio (handles a plain
 //            state_dict AND a Megvii checkpoint {'model': OrderedDict[str->Tensor], ...}).
+//     arch_dir: where manifest_unfused.txt + names.txt live. Defaults to pure/ref/data_unf/;
+//               pass pure/ref/arch/yolox_s/ (etc.) to generate weights for another SIZE.
 #include "ptio.hpp"
 #include <cstdio>
 #include <fstream>
@@ -23,7 +25,7 @@ int main(int argc, char** argv) {
   std::string out  = argc > 1 ? argv[1] : "init.pt";
   std::string mode = argc > 2 ? argv[2] : "rand";
   std::string pre  = argc > 3 ? argv[3] : "yolox_tiny.pth";
-  const std::string DU = "pure/ref/data_unf/";
+  const std::string DU = argc > 4 ? argv[4] : "pure/ref/data_unf/";
 
   // architecture: header line = layer count, then "kind Co Ci k s eps g" per layer.
   std::ifstream mf(DU + "manifest_unfused.txt");
