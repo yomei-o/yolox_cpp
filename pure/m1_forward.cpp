@@ -4,11 +4,11 @@
 
 int main() {
   const std::string D = "pure/ref/data_net/";
-  int64_t IMG, BD; { std::ifstream f(D + "io.txt"); f >> IMG >> BD; }
+  int64_t IMG, BD, DW = 0; { std::ifstream f(D + "io.txt"); f >> IMG >> BD >> DW; }
   auto prov = load_net(D);
   auto x = from_data({1, 3, IMG, IMG}, rd(D + "x.bin"));
 
-  auto outs = yolox_forward(x, prov, BD);
+  auto outs = yolox_forward(x, prov, BD, (bool)DW);
   printf("consumed %zu/%zu convs, %zu levels\n", prov.i, prov.convs.size(), outs.size());
 
   double worst = 0;
