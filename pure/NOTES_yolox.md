@@ -65,7 +65,8 @@ per grid cell (gx,gy) at stride s:
 
 ## Milestones
 - M0 oracle + blueprint + Focus op  — ✅ done
-- M1 forward parity (net_yolox.hpp + export_yolox.py, CPU-forced) vs torch  — next
+- M1 forward parity (net_yolox.hpp + export_yolox.py, CPU-forced) vs torch  — ✅ done
+  (L0 1.8e-4 / L1 4e-5 / L2 1.9e-5). `pure/m1_forward.cpp`, debug `pure/m_dbg.cpp`.
 - M2 loss: SimOTA (plain) + IoU/BCE (fwd+bwd) vs torch
 - M3 training loop; then backend seam already present → nvcc GPU build (Colab)
 
@@ -73,3 +74,5 @@ per grid cell (gx,gy) at stride s:
 - export must **force CPU** (`.cpu()`) — torch.hub loads to GPU on GPU hosts (learned on v5).
 - YOLOX head output channel order is **[reg, obj, cls]** (not cls-first).
 - Focus channel order [tl,bl,tr,br] — must match exactly.
+- **dark5's CSPLayer has shortcut=False** (it sits after SPP); dark2/3/4 CSPLayers are True.
+  Neck (PAFPN) CSPLayers are all False. Getting this wrong diverges only from c5 onward.
