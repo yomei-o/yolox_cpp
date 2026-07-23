@@ -5,9 +5,11 @@ import os, sys, torch, torch.nn as nn
 
 HERE = os.path.dirname(os.path.abspath(__file__)); D = os.path.join(HERE, "data_net"); os.makedirs(D, exist_ok=True)
 IMG = int(sys.argv[1]) if len(sys.argv) > 1 else 64
+MODEL = sys.argv[2] if len(sys.argv) > 2 else "yolox_tiny"
 
-m = torch.hub.load("Megvii-BaseDetection/YOLOX", "yolox_tiny", pretrained=True, trust_repo=True, verbose=False)
+m = torch.hub.load("Megvii-BaseDetection/YOLOX", MODEL, pretrained=True, trust_repo=True, verbose=False)
 m = m.eval().cpu().float()
+BD = len(m.backbone.backbone.dark2[1].m)   # base_depth (CSPLayer repeats)
 
 convs = []  # (w, b, k, stride, act)
 def fuse(bc):
@@ -64,5 +66,5 @@ with torch.no_grad():
         out = torch.cat([reg, obj, cls], 1)
         save(f"ref_L{i}.bin", out); shapes.append(tuple(out.shape))
 save("x.bin", x)
-open(os.path.join(D, "io.txt"), "w").write(f"{IMG}\n" + "\n".join(f"{s[1]} {s[2]} {s[3]}" for s in shapes) + "\n")
-print("convs:", len(convs), " img:", IMG, " level shapes:", shapes)
+open(os.path.join(D, "io.txt"), "w").write(f"{IMG} {BD}\n" + "\n".join(f"{s[1]} {s[2]} {s[3]}" for s in shapes) + "\n")
+print(f"{MODEL}: convs={len(convs)} img={IMG} base_depth={BD} level_shapes={shapes}")

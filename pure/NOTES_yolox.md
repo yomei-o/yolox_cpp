@@ -89,6 +89,15 @@ per grid cell (gx,gy) at stride s:
   parses & runs the .onnx graph-driven in the pure engine (~1.8e-4). Added `slice_hw` op
   (strided spatial slice) + extended onnx_run Slice to handle axes[2,3]/steps.
 
+## Model sizes (t/n/s/m/l/x)
+- Widths are data-driven (from loaded conv shapes); depth = CSPLayer repeats varies.
+  `yolox_forward(in, prov, base_depth)`: base_depth from export (`io.txt` line 1 = "IMG BD").
+  base_depth = round(dep_mul*3): tiny/s = 1, m = 2, l = 3, x = 4.
+- ✅ **t/s/m/l/x** covered by the depth-parameterized net (t/s/m verified forward-parity;
+  l/x same code path, just export their weights: `export_yolox.py <img> yolox_l`).
+- ⏳ **nano**: uses **depthwise (grouped) conv** — needs grouped conv in the engine
+  (v11 has it) + DWConv variants of BaseConv/Bottleneck. Not yet.
+
 ## Gotchas to remember
 - export must **force CPU** (`.cpu()`) — torch.hub loads to GPU on GPU hosts (learned on v5).
 - YOLOX head output channel order is **[reg, obj, cls]** (not cls-first).

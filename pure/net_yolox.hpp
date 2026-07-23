@@ -61,25 +61,26 @@ inline Tensor head_level(const Tensor& f, Provider& p) {
   return concat_ch({reg, obj, cls});
 }
 
-// Full yolox-tiny. Returns 3 per-level raw outputs (b,85,h,w) for strides [8,16,32].
-inline std::vector<Tensor> yolox_forward(const Tensor& in, Provider& p) {
+// Full yolox (non-depthwise: t/s/m/l/x). base_depth bd = CSPLayer repeats (dark2/5=bd,
+// dark3/4=3*bd, neck=bd). Widths are data-driven from the loaded conv shapes.
+inline std::vector<Tensor> yolox_forward(const Tensor& in, Provider& p, int64_t bd = 1) {
   // backbone (CSPDarknet)
-  auto x = bc(focus(in), p);                      // stem: Focus -> BaseConv -> 24
-  x = bc(x, p); x = csp(x, p, 1, true);           // dark2
-  x = bc(x, p); auto c3 = csp(x, p, 3, true);     // dark3 -> C3 (s8, 96)
-  x = bc(c3, p); auto c4 = csp(x, p, 3, true);    // dark4 -> C4 (s16, 192)
-  x = bc(c4, p); x = spp(x, p); auto c5 = csp(x, p, 1, false);  // dark5 -> C5 (s32, 384) (CSP shortcut=False)
-  // neck (PAFPN)
-  auto fpn0 = bc(c5, p);                          // lateral_conv0 384->192
+  auto x = bc(focus(in), p);                      // stem: Focus -> BaseConv
+  x = bc(x, p); x = csp(x, p, bd, true);          // dark2
+  x = bc(x, p); auto c3 = csp(x, p, 3*bd, true);  // dark3 -> C3 (s8)
+  x = bc(c3, p); auto c4 = csp(x, p, 3*bd, true); // dark4 -> C4 (s16)
+  x = bc(c4, p); x = spp(x, p); auto c5 = csp(x, p, bd, false);  // dark5 -> C5 (s32) (shortcut=False)
+  // neck (PAFPN) — CSPLayers shortcut=False
+  auto fpn0 = bc(c5, p);                          // lateral_conv0
   auto u = upsample_nearest(fpn0, 2);
-  auto p4 = csp(concat_ch({u, c4}), p, 1, false); // C3_p4 -> 192
-  auto red = bc(p4, p);                           // reduce_conv1 192->96
+  auto p4 = csp(concat_ch({u, c4}), p, bd, false); // C3_p4
+  auto red = bc(p4, p);                           // reduce_conv1
   auto u2 = upsample_nearest(red, 2);
-  auto pan2 = csp(concat_ch({u2, c3}), p, 1, false);   // C3_p3 -> 96  (s8)
-  auto d0 = bc(pan2, p);                          // bu_conv2 96->96 s2
-  auto pan1 = csp(concat_ch({d0, red}), p, 1, false);  // C3_n3 -> 192 (s16)
-  auto d1 = bc(pan1, p);                          // bu_conv1 192->192 s2
-  auto pan0 = csp(concat_ch({d1, fpn0}), p, 1, false); // C3_n4 -> 384 (s32)
+  auto pan2 = csp(concat_ch({u2, c3}), p, bd, false);   // C3_p3 (s8)
+  auto d0 = bc(pan2, p);                          // bu_conv2 s2
+  auto pan1 = csp(concat_ch({d0, red}), p, bd, false);  // C3_n3 (s16)
+  auto d1 = bc(pan1, p);                          // bu_conv1 s2
+  auto pan0 = csp(concat_ch({d1, fpn0}), p, bd, false); // C3_n4 (s32)
   // decoupled head
   std::vector<Tensor> out;
   for (auto& f : {pan2, pan1, pan0}) out.push_back(head_level(f, p));
