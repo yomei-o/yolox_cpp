@@ -38,6 +38,19 @@ g++ -std=c++20 -O2 -fopenmp -Ipure/third_party pure/m_demo.cpp -o m_demo   # or 
 ./m_demo assets/bus.jpg out.png 640
 ```
 
+| `assets/bus.jpg` → | `assets/zidane.jpg` → |
+|---|---|
+| ![bus](assets/bus_detected.png) | ![zidane](assets/zidane_detected.png) |
+
+```
+assets/bus.jpg  810x1080          assets/zidane.jpg  1280x720
+  bus     conf=0.94                 person  conf=0.87
+  person  conf=0.87                 person  conf=0.84
+  person  conf=0.86                 tie     conf=0.75
+  person  conf=0.83                 tie     conf=0.48
+```
+(YOLOX-tiny, shipped `weights/yolox_tiny/`; decode + NMS in `pure/infer_yolox.hpp`.)
+
 ## Build (engine self-test, no deps)
 ```sh
 g++ -std=c++20 -O2 -fopenmp pure/gradcheck2.cpp -o gc2 && ./gc2   # incl. Focus
