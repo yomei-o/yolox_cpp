@@ -22,8 +22,21 @@ YOLOX is the most different of the family: **anchor-free with a decoupled head**
   Slice + Concat) — onnxruntime-verified (~9e-5); `m_onnx_run.cpp` runs a `.onnx` graph-driven
   in the pure engine (~1.8e-4). Hand-rolled protobuf, no deps.
 
-conv routes through the single-header `bk::` device seam, so `nvcc -DUSE_CUDA` trains on a
-real GPU (verified for the sibling repos on a Colab T4).
+- ✅ **inference**: anchor-free decode + class-aware NMS (`pure/infer_yolox.hpp`);
+  `pure/m_demo.cpp` runs on a real image straight from a checkout (shipped
+  `weights/yolox_tiny/`) — `bus.jpg` → bus + 3-4 people. `pure/m_synth.cpp` is an
+  end-to-end test (train a few dozen 128×128 synthetic images → detect).
+- ✅ **all sizes** t/n/s/m/l/x (nano = depthwise) across forward / training / .pt / ONNX.
+
+conv routes through the single-header `bk::` device seam, so `nvcc -DUSE_CUDA` trains and
+runs on a real GPU. **Colab GPU check: [colab/gpu_check.ipynb](colab/gpu_check.ipynb)**
+(https://colab.research.google.com/github/yomei-o/yolox_cpp/blob/main/colab/gpu_check.ipynb).
+
+## Run the demo
+```sh
+g++ -std=c++20 -O2 -fopenmp -Ipure/third_party pure/m_demo.cpp -o m_demo   # or nvcc -DUSE_CUDA
+./m_demo assets/bus.jpg out.png 640
+```
 
 ## Build (engine self-test, no deps)
 ```sh
