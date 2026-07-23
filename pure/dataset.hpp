@@ -189,31 +189,111 @@ inline void make_mosaic(const Dataset& d, const int four[4], int64_t S, std::mt1
   }
 }
 
+// Augmentation toggles/gains (Ultralytics-like defaults). Pass to load_minibatch.
+struct AugCfg {
+  bool flip = true, hsv = true, affine = true, mosaic = false, mixup = false;
+  float hgain = 0.015f, sgain = 0.7f, vgain = 0.4f;             // HSV jitter gains
+  float degrees = 10.f, translate = 0.1f, scale = 0.5f, shear = 2.f; // random-affine ranges
+};
+
+// Build one "base" image into px (3*S*S) + boxes/labels (SxS pixel xyxy): a 4-image mosaic
+// or a single letterboxed image, both label formats.
+inline void build_base(const Dataset& d, int idx, bool mosaic, std::mt19937& rng,
+                       std::vector<float>& px, std::vector<float>& gb, std::vector<int64_t>& gl) {
+  int64_t S = d.S, N = (int64_t)d.items.size();
+  if (mosaic) { int four[4] = { idx, (int)(rng()%N), (int)(rng()%N), (int)(rng()%N) };
+                make_mosaic(d, four, S, rng, px, gb, gl); }
+  else { Letterbox lb; auto xi = load_image_letterbox(d.items[idx].img, S, lb);
+         px.assign(xi->data.begin(), xi->data.end());
+         load_boxes_orig(d.items[idx].lbl, d.yolo, lb.w0, lb.h0, gb, gl); lb_map(gb, lb); }
+}
+
+// HSV colour jitter in-place (random gains around 1); RGB planar in [0,1].
+inline void apply_hsv(std::vector<float>& px, int64_t S, const AugCfg& a, std::mt19937& rng) {
+  std::uniform_real_distribution<float> U(-1.f, 1.f);
+  float gh = 1 + U(rng)*a.hgain, gs = 1 + U(rng)*a.sgain, gv = 1 + U(rng)*a.vgain;
+  int64_t P = S*S;
+  for (int64_t i = 0; i < P; ++i) {
+    float r = px[i], g = px[P+i], b = px[2*P+i];
+    float mx = std::max({r,g,b}), mn = std::min({r,g,b}), d = mx - mn;
+    float h = 0, s = mx <= 0 ? 0 : d/mx, v = mx;
+    if (d > 1e-6f) { if (mx==r) h=(g-b)/d; else if (mx==g) h=2+(b-r)/d; else h=4+(r-g)/d; h*=60; if (h<0) h+=360; }
+    h = std::fmod(h*gh, 360.f); if (h < 0) h += 360; s = std::clamp(s*gs, 0.f, 1.f); v = std::clamp(v*gv, 0.f, 1.f);
+    float c = v*s, x = c*(1 - std::abs(std::fmod(h/60.f, 2.f) - 1)), m = v - c, rr, gg, bb;
+    int hi = (int)(h/60.f) % 6;
+    switch (hi) { case 0: rr=c;gg=x;bb=0;break; case 1: rr=x;gg=c;bb=0;break; case 2: rr=0;gg=c;bb=x;break;
+                  case 3: rr=0;gg=x;bb=c;break; case 4: rr=x;gg=0;bb=c;break; default: rr=c;gg=0;bb=x; }
+    px[i] = rr+m; px[P+i] = gg+m; px[2*P+i] = bb+m;
+  }
+}
+
+// Random affine (rotate + scale + shear + translate) in-place on px, with boxes remapped
+// (corner transform + clip). Areas that map outside stay grey 114.
+inline void apply_affine(std::vector<float>& px, int64_t S, std::vector<float>& gb,
+                         std::vector<int64_t>& gl, const AugCfg& a, std::mt19937& rng) {
+  std::uniform_real_distribution<float> U(-1.f, 1.f), Uab(0.f, 1.f);
+  const float PI = 3.14159265f;
+  float ang = U(rng)*a.degrees * PI/180.f, sc = 1 + U(rng)*a.scale;
+  float shx = std::tan(U(rng)*a.shear * PI/180.f), shy = std::tan(U(rng)*a.shear * PI/180.f);
+  float tx = U(rng)*a.translate*S, ty = U(rng)*a.translate*S;
+  float ca = std::cos(ang)*sc, sa = std::sin(ang)*sc;
+  // linear part L = R(scale) * shear
+  float l00 = ca + (-sa)*shy, l01 = ca*shx + (-sa), l10 = sa + ca*shy, l11 = sa*shx + ca;
+  float det = l00*l11 - l01*l10; if (std::abs(det) < 1e-6f) det = det < 0 ? -1e-6f : 1e-6f;
+  float i00 = l11/det, i01 = -l01/det, i10 = -l10/det, i11 = l00/det;   // inverse for sampling
+  float cx = S/2.f, cy = S/2.f;
+  std::vector<float> out(px.size(), 114.f/255.f);
+  for (int64_t oy = 0; oy < S; ++oy) for (int64_t ox = 0; ox < S; ++ox) {
+    float rx = ox - cx - tx, ry = oy - cy - ty;
+    float ix = i00*rx + i01*ry + cx, iy = i10*rx + i11*ry + cy;
+    int x0 = (int)std::floor(ix), y0 = (int)std::floor(iy);
+    if (x0 < -1 || x0 >= S || y0 < -1 || y0 >= S) continue;
+    float fx = ix - x0, fy = iy - y0;
+    int x1 = std::min(x0+1, (int)S-1), y1 = std::min(y0+1, (int)S-1);
+    int x0c = std::clamp(x0, 0, (int)S-1), y0c = std::clamp(y0, 0, (int)S-1);
+    for (int c = 0; c < 3; ++c) {
+      float p00 = px[(c*S+y0c)*S+x0c], p01 = px[(c*S+y0c)*S+x1], p10 = px[(c*S+y1)*S+x0c], p11 = px[(c*S+y1)*S+x1];
+      out[(c*S+oy)*S+ox] = (p00*(1-fx)+p01*fx)*(1-fy) + (p10*(1-fx)+p11*fx)*fy;
+    }
+  }
+  px.swap(out);
+  std::vector<float> nb; std::vector<int64_t> nl;
+  for (size_t m = 0; m < gl.size(); ++m) {
+    float xs[4] = {gb[m*4], gb[m*4+2], gb[m*4+2], gb[m*4]}, ys[4] = {gb[m*4+1], gb[m*4+1], gb[m*4+3], gb[m*4+3]};
+    float mnx=1e9f, mny=1e9f, mxx=-1e9f, mxy=-1e9f;
+    for (int k = 0; k < 4; ++k) {
+      float ox = l00*(xs[k]-cx) + l01*(ys[k]-cy) + cx + tx, oy = l10*(xs[k]-cx) + l11*(ys[k]-cy) + cy + ty;
+      mnx=std::min(mnx,ox); mxx=std::max(mxx,ox); mny=std::min(mny,oy); mxy=std::max(mxy,oy);
+    }
+    mnx=std::clamp(mnx,0.f,(float)S); mxx=std::clamp(mxx,0.f,(float)S);
+    mny=std::clamp(mny,0.f,(float)S); mxy=std::clamp(mxy,0.f,(float)S);
+    if (mxx-mnx > 2 && mxy-mny > 2) { nl.push_back(gl[m]); nb.insert(nb.end(), {mnx,mny,mxx,mxy}); }
+  }
+  gb.swap(nb); gl.swap(nl);
+}
+
 // Load a mini-batch (the given indices) into (B,3,S,S) + padded GT, both label formats.
-// augment: horizontal flip + brightness jitter. mosaic: each output is a 4-image mosaic
-// (its first tile = idx[n], the other three random) — off for validation.
+// When augment: mosaic (if a.mosaic) -> mixup (if a.mixup) -> random affine -> HSV -> flip.
 inline Batch load_minibatch(const Dataset& d, const std::vector<int>& idx, bool augment,
-                            uint32_t seed, bool mosaic = false) {
+                            uint32_t seed, const AugCfg& a = {}) {
   std::mt19937 rng(seed); std::uniform_real_distribution<float> U(0.f, 1.f);
   int64_t B = (int64_t)idx.size(), S = d.S, N = (int64_t)d.items.size();
   std::vector<std::vector<float>> gbs(B); std::vector<std::vector<int64_t>> gls(B);
   Batch bt; bt.B = B; bt.x = make_tensor({B, 3, S, S}); int64_t M = 0;
   for (int64_t n = 0; n < B; ++n) {
-    std::vector<float> px;
-    if (mosaic) {
-      int four[4] = { idx[n], (int)(rng()%N), (int)(rng()%N), (int)(rng()%N) };
-      make_mosaic(d, four, S, rng, px, gbs[n], gls[n]);
-    } else {
-      Letterbox lb; auto xi = load_image_letterbox(d.items[idx[n]].img, S, lb);
-      px.assign(xi->data.begin(), xi->data.end());
-      load_boxes_orig(d.items[idx[n]].lbl, d.yolo, lb.w0, lb.h0, gbs[n], gls[n]);
-      lb_map(gbs[n], lb);
+    std::vector<float> px; build_base(d, idx[n], augment && a.mosaic, rng, px, gbs[n], gls[n]);
+    if (augment && a.mixup && U(rng) < 0.5f) {                  // blend a second base + merge labels
+      std::vector<float> px2, gb2; std::vector<int64_t> gl2;
+      build_base(d, (int)(rng()%N), a.mosaic, rng, px2, gb2, gl2);
+      for (size_t i = 0; i < px.size() && i < px2.size(); ++i) px[i] = 0.5f*px[i] + 0.5f*px2[i];
+      for (size_t m = 0; m < gl2.size(); ++m) { gls[n].push_back(gl2[m]); for (int j = 0; j < 4; ++j) gbs[n].push_back(gb2[m*4+j]); }
     }
-    bool flip = augment && U(rng) < 0.5f;
-    float bri = augment ? 0.8f + 0.4f*U(rng) : 1.f;         // brightness 0.8..1.2
+    if (augment && a.affine) apply_affine(px, S, gbs[n], gls[n], a, rng);
+    if (augment && a.hsv)    apply_hsv(px, S, a, rng);
+    bool flip = augment && a.flip && U(rng) < 0.5f;
     float* dst = bt.x->data.data() + n*3*S*S;
     for (int c = 0; c < 3; ++c) for (int64_t y = 0; y < S; ++y) for (int64_t x = 0; x < S; ++x) {
-      float v = px[(c*S + y)*S + (flip ? S-1-x : x)] * bri;
+      float v = px[(c*S + y)*S + (flip ? S-1-x : x)];
       dst[(c*S + y)*S + x] = v < 0 ? 0 : (v > 1 ? 1 : v);
     }
     if (flip) for (size_t m = 0; m < gls[n].size(); ++m) { float x1 = gbs[n][m*4], x2 = gbs[n][m*4+2]; gbs[n][m*4] = S - x2; gbs[n][m*4+2] = S - x1; }

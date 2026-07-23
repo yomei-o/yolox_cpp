@@ -102,18 +102,27 @@ else from the `.bin` export. So a fresh clone bootstraps and trains with **zero 
 `make_init_pt` → `init.pt` → `train_cli`. (`python pure/ref/make_synth.py 96 24` is the one
 Python touch, only to fabricate the demo images.)
 
-**Standard datasets + mosaic.** `train_cli` also reads a **standard Ultralytics/YOLO
-dataset** — pass an images directory (or a list file) plus an `imgsz`, and it scans
-`images/`↔`labels/`, reads normalised `cls xc yc w h` labels, and letterboxes arbitrary-size
-images. A 7th arg toggles **mosaic** augmentation (on by default in this mode; flip +
-brightness always on):
-```sh
-python pure/ref/make_synth_yolo.py 40      # tiny dataset in the standard images/ + labels/ layout
-./train_cli pure/ref/data_yolo/images/train pure/ref/data_yolo/images/val 16 4 init.pt 128 1
-```
+**Standard datasets + augmentation.** Training reads a **standard Ultralytics/YOLO dataset**
+(scan `images/`↔`labels/`, normalised `cls xc yc w h` labels, arbitrary-size images
+letterboxed). Augmentation (`pure/dataset.hpp` `AugCfg`) is **mosaic + mixup + random-affine
+(rotate/scale/shear/translate) + HSV + flip**, with **close-mosaic** (disabled for the last
+N epochs).
 
-**Remaining work** (real-dataset convergence parity, richer augmentation, `data.yaml`/unified
-CLI, EMA/resume, batched forward) is tracked in **[RESUME.md](RESUME.md)**.
+**Unified CLI + `data.yaml`.** `pure/yolo.cpp` is a single `yolo` command reading a standard
+`data.yaml` (`path`/`train`/`val`/`nc`/`names`):
+```sh
+python pure/ref/make_synth_yolo.py 40                          # standard images/ + labels/ layout
+cl /std:c++20 /O2 /EHsc /Ipure\third_party pure\yolo.cpp        # or g++ ...
+./yolo train  --data data.yaml --weights init.pt --imgsz 640 --epochs 100 --batch 8 \
+              --mosaic 1 --mixup 1 --close-mosaic 10
+./yolo val    --data data.yaml --weights best.pt --imgsz 640   # -> mAP@0.5 and mAP@0.5:0.95
+./yolo detect --weights best.pt --source img.jpg --out out.png --data data.yaml
+```
+YOLOX forward/SimOTA/loss are per-image, so a mini-batch sums per-image loss into one graph.
+`yolo export` currently points at the standalone ONNX exporter.
+
+**Remaining work** (real-dataset convergence parity, custom `nc`, in-CLI export, EMA/resume,
+batched per-image forward, Apple-Silicon BLAS) is tracked in **[RESUME.md](RESUME.md)**.
 
 ## Build (engine self-test, no deps)
 ```sh

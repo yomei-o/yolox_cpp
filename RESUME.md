@@ -14,21 +14,26 @@ this file is the forward-looking TODO.
 - **Standard-YOLO dataset ingestion** — directory scan (`images/`↔`labels/`), normalised
   `cls xc yc w h` labels, arbitrary-size images letterboxed (`pure/dataset.hpp`
   `read_yolo_dataset` / `load_boxes_orig`).
-- **Mosaic augmentation** (`make_mosaic`) + horizontal flip + brightness.
-  `train_cli … <imgsz> <mosaic>`.
+- **Augmentation** — mosaic + mixup + random-affine (rotate/scale/shear/translate) + HSV +
+  flip, with **close-mosaic** (disable for last N epochs). `AugCfg` / CLI flags.
+- **Unified `yolo` CLI** (`pure/yolo.cpp`) reading `data.yaml`: `train` / `val` / `detect`
+  (`export` delegates to the standalone ONNX exporter — see remaining #3). Val reports
+  **mAP@0.5 and mAP@0.5:0.95**.
 - GPU/CUDA seam (`pure/backend.hpp`); conv/matmul route through `bk::`.
 
 ## Remaining (roughly in priority order)
 1. **Real-dataset convergence parity** — train on COCO128 (or similar) and compare final
    mAP@0.5:0.95 against the reference YOLOX. Only synthetic data checked so far.
-2. **Richer augmentation** — HSV colour jitter, random affine (scale/translate/rotate/shear),
-   mixup, and "close mosaic for the last N epochs". Only flip + brightness + mosaic today.
-3. **`data.yaml` + unified CLI** — parse `data.yaml` (train/val paths, `nc`, `names`) and add
-   `train`/`val`/`detect`/`export` subcommands.
+2. **Custom `nc`** — head is fixed at 80 classes; `nc != 80` needs the cls head resized +
+   re-initialised. Today class ids must be < 80.
+3. **`export` in the unified CLI** — fold BN from the `.pt` and emit ONNX in-CLI (today
+   `yolo export` points at the standalone, onnxruntime-verified exporter).
 4. **Training-quality features** — EMA weights, resume-from-checkpoint, multi-scale, label
-   smoothing, mAP@0.5:0.95 in the val loop (only mAP@0.5 printed now).
+   smoothing, warmup-bias-lr. (mAP@0.5:0.95 in val — done.)
 5. **Speed** — YOLOX forward is **per-image, summed per mini-batch** (SimOTA/loss are
-   per-image); batch it like yolov8 for a real speedup. Verify the GPU path on hardware.
+   per-image); batch it like yolov8 for a real speedup.
+6. **CPU speed on Apple Silicon** — CUDA seam doesn't help on Mac (Metal≠CUDA); add a BLAS
+   path (Apple Accelerate / OpenBLAS) to `bk::gemm_hosted` for a big no-GPU CPU speedup.
 
 ## Notes / gotchas
 - Coords: everything is xyxy in the **letterboxed SxS pixel** space; GT and detections share

@@ -67,7 +67,8 @@ int main(int argc, char** argv) {
   // load one image into a 1-image (1,3,S,S) tensor + GT (labels are xyxy in S-space)
   auto load_one = [&](const Dataset& d, int i, bool aug, uint32_t seed, std::vector<float>& gtb_cxcywh,
                       std::vector<int64_t>& gtc, std::vector<float>& gt_xyxy, bool mos=false) -> Tensor {
-    Batch b = load_minibatch(d, {i}, aug, seed, mos);
+    AugCfg ac; ac.mosaic = mos; ac.mixup = mos;   // HSV/affine/flip on when aug
+    Batch b = load_minibatch(d, {i}, aug, seed, ac);
     int64_t M = b.M; gtb_cxcywh.clear(); gtc.clear(); gt_xyxy.clear();
     for (int64_t m=0;m<M;++m) if (b.mask[m] > 0.5f) {
       float x1=b.gt_boxes[m*4], y1=b.gt_boxes[m*4+1], x2=b.gt_boxes[m*4+2], y2=b.gt_boxes[m*4+3];
@@ -95,8 +96,10 @@ int main(int argc, char** argv) {
   std::vector<int> order(tr.items.size()); std::iota(order.begin(), order.end(), 0);
   std::mt19937 rng(0);
   int steps_per_epoch = ((int)tr.items.size() + BATCH - 1) / BATCH, total = EPOCHS * steps_per_epoch, gstep = 0;
+  int closeMosaic = argc>8 ? atoi(argv[8]) : std::max(1, EPOCHS/10);   // disable mosaic/mixup last N epochs
   double best = -1;
   for (int ep = 0; ep < EPOCHS; ++ep) {
+    bool mos = mosaic && ep < EPOCHS - closeMosaic;
     std::shuffle(order.begin(), order.end(), rng); double eloss = 0; int nb = 0;
     for (size_t off = 0; off < order.size(); off += BATCH) {
       size_t end = std::min(order.size(), off + (size_t)BATCH);
@@ -105,7 +108,7 @@ int main(int argc, char** argv) {
       Tensor mb; int cnt = 0;
       for (size_t t = off; t < end; ++t) {
         std::vector<float> gcx,gxy; std::vector<int64_t> gc;
-        auto x = load_one(tr, order[t], true, rng(), gcx, gc, gxy, mosaic);
+        auto x = load_one(tr, order[t], true, rng(), gcx, gc, gxy, mos);
         prov.i=0; auto raw = yolox_forward_unfused(x, prov, true, BD, (bool)DWF);
         auto L = yolox_loss(raw, xs, ys, st, gcx, gc, A, NC, (int64_t)gc.size());
         mb = cnt ? add(mb, L.total) : L.total; ++cnt;
