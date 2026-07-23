@@ -21,17 +21,22 @@
 static const int64_t NC = 80;
 
 int main(int argc, char** argv) {
+  setvbuf(stdout, nullptr, _IONBF, 0);   // unbuffered so per-epoch progress shows when redirected
   std::string trainL = argc>1?argv[1]:"pure/ref/data_synth/list.txt";
   std::string valL   = argc>2?argv[2]:"pure/ref/data_synth/val.txt";
   int EPOCHS = argc>3?atoi(argv[3]):8, BATCH = argc>4?atoi(argv[4]):4;
   std::string initpt = argc>5?argv[5]:"";
+  int imgsz = argc>6?atoi(argv[6]):0;                 // >0 => standard-YOLO dataset (dir/list + normalised labels)
+  bool mosaic = argc>7?atoi(argv[7])!=0:(imgsz>0);    // mosaic on by default in YOLO mode
   const std::string DU = "pure/ref/data_unf/";
 
-  Dataset tr = read_dataset(trainL), va = read_dataset(valL);
+  Dataset tr, va;
+  if (imgsz>0) { tr = read_yolo_dataset(trainL, imgsz); va = read_yolo_dataset(valL, imgsz); }
+  else { tr = read_dataset(trainL); va = read_dataset(valL); }
   int64_t S = tr.S;
   int64_t BD=1, DWF=0; { std::ifstream f(DU + "io.txt"); int64_t im; f >> im >> BD >> DWF; }
-  printf("train=%zu val=%zu imgsz=%lld batch=%d epochs=%d  (BD=%lld DW=%lld)\n",
-         tr.items.size(), va.items.size(), (long long)S, BATCH, EPOCHS, (long long)BD, (long long)DWF);
+  printf("train=%zu val=%zu imgsz=%lld batch=%d epochs=%d  (BD=%lld DW=%lld) fmt=%s mosaic=%d\n",
+         tr.items.size(), va.items.size(), (long long)S, BATCH, EPOCHS, (long long)BD, (long long)DWF, tr.yolo?"yolo":"legacy", (int)mosaic);
 
   // initial weights: from the init .pt (pure-C++ read, arch from the tiny manifest) if one
   // is given and exists, else from the Python-exported .bin files.
@@ -61,8 +66,8 @@ int main(int argc, char** argv) {
 
   // load one image into a 1-image (1,3,S,S) tensor + GT (labels are xyxy in S-space)
   auto load_one = [&](const Dataset& d, int i, bool aug, uint32_t seed, std::vector<float>& gtb_cxcywh,
-                      std::vector<int64_t>& gtc, std::vector<float>& gt_xyxy) -> Tensor {
-    Batch b = load_minibatch(d, {i}, aug, seed);
+                      std::vector<int64_t>& gtc, std::vector<float>& gt_xyxy, bool mos=false) -> Tensor {
+    Batch b = load_minibatch(d, {i}, aug, seed, mos);
     int64_t M = b.M; gtb_cxcywh.clear(); gtc.clear(); gt_xyxy.clear();
     for (int64_t m=0;m<M;++m) if (b.mask[m] > 0.5f) {
       float x1=b.gt_boxes[m*4], y1=b.gt_boxes[m*4+1], x2=b.gt_boxes[m*4+2], y2=b.gt_boxes[m*4+3];
@@ -100,7 +105,7 @@ int main(int argc, char** argv) {
       Tensor mb; int cnt = 0;
       for (size_t t = off; t < end; ++t) {
         std::vector<float> gcx,gxy; std::vector<int64_t> gc;
-        auto x = load_one(tr, order[t], true, rng(), gcx, gc, gxy);
+        auto x = load_one(tr, order[t], true, rng(), gcx, gc, gxy, mosaic);
         prov.i=0; auto raw = yolox_forward_unfused(x, prov, true, BD, (bool)DWF);
         auto L = yolox_loss(raw, xs, ys, st, gcx, gc, A, NC, (int64_t)gc.size());
         mb = cnt ? add(mb, L.total) : L.total; ++cnt;

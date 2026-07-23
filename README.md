@@ -102,6 +102,19 @@ else from the `.bin` export. So a fresh clone bootstraps and trains with **zero 
 `make_init_pt` → `init.pt` → `train_cli`. (`python pure/ref/make_synth.py 96 24` is the one
 Python touch, only to fabricate the demo images.)
 
+**Standard datasets + mosaic.** `train_cli` also reads a **standard Ultralytics/YOLO
+dataset** — pass an images directory (or a list file) plus an `imgsz`, and it scans
+`images/`↔`labels/`, reads normalised `cls xc yc w h` labels, and letterboxes arbitrary-size
+images. A 7th arg toggles **mosaic** augmentation (on by default in this mode; flip +
+brightness always on):
+```sh
+python pure/ref/make_synth_yolo.py 40      # tiny dataset in the standard images/ + labels/ layout
+./train_cli pure/ref/data_yolo/images/train pure/ref/data_yolo/images/val 16 4 init.pt 128 1
+```
+
+**Remaining work** (real-dataset convergence parity, richer augmentation, `data.yaml`/unified
+CLI, EMA/resume, batched forward) is tracked in **[RESUME.md](RESUME.md)**.
+
 ## Build (engine self-test, no deps)
 ```sh
 g++ -std=c++20 -O2 -fopenmp pure/gradcheck2.cpp -o gc2 && ./gc2   # incl. Focus
