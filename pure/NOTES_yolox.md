@@ -77,6 +77,12 @@ per grid cell (gx,gy) at stride s:
 - M3 training loop  — ✅ done. `m3_train.cpp`: forward→SimOTA→loss→backward→SGD,
   loss 24.1→3.2 on a synthetic batch. conv routes through the `bk::` seam so a
   `nvcc -DUSE_CUDA` build trains on GPU (same as v5/v8/v11).
+- .pt write-back  — ✅ done. Unfused conv+BN path (`net_yolox_unfused.hpp`, uses `bn.hpp`)
+  verified vs YOLOX (`m_unfused.cpp`, ~1e-4). `m_writeback.cpp` trains it (loss 23.9→3.5,
+  lr 1e-4; higher lr → exp() overflow → NaN) and dumps weights; `ref/writeback_yolox.py`
+  drops them into a YOLOX model (canonical `yolox_walk` order) → `torch.save({"model":...})`
+  → re-loads with 0 missing/unexpected keys and runs. Train BN in eval (running stats frozen)
+  so they round-trip unchanged.
 
 ## Gotchas to remember
 - export must **force CPU** (`.cpu()`) — torch.hub loads to GPU on GPU hosts (learned on v5).

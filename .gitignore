@@ -29,3 +29,4 @@ __pycache__/
 # shipped weights / model / demo assets (committed despite the patterns above)
 !yolov8n.pt
 !weights/yolov8n/weights.bin
+*.pth
