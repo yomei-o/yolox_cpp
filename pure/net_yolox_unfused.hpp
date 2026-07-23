@@ -37,6 +37,36 @@ inline ProviderU load_unfused(const std::string& D) {
   return p;
 }
 
+// Same as load_unfused but weights come from a state_dict .pt (read in pure C++ by ptio)
+// instead of per-layer .bin files. Arch is from the tiny committable manifest; each tensor
+// is looked up by its state_dict key from names.txt (engine order). No Python.
+#include "ptio.hpp"
+#include <map>
+inline ProviderU load_unfused_pt(const std::string& D, const std::string& pt_path) {
+  std::ifstream f(D + "manifest_unfused.txt");
+  if (!f) { printf("missing %smanifest_unfused.txt\n", D.c_str()); std::exit(1); }
+  std::vector<std::string> names; { std::ifstream nf(D + "names.txt"); std::string s; while (nf >> s) names.push_back(s); }
+  std::map<std::string, std::vector<float>> W;
+  { auto ts = pt::load_pt(pt_path); if (ts.empty()) ts = pt::load_pt_state_under(pt_path, "model");
+    for (auto& t : ts) W[t.name] = t.data; }
+  auto get = [&](size_t idx) -> std::vector<float>& {
+    auto it = W.find(names[idx]); if (it == W.end()) { printf("key not in %s: %s\n", pt_path.c_str(), names[idx].c_str()); std::exit(1); } return it->second; };
+  std::string h; std::getline(f, h); int n = std::stoi(h); ProviderU p; size_t ni = 0;
+  for (int i = 0; i < n; ++i) {
+    std::string line; std::getline(f, line); std::istringstream ss(line);
+    int kind; int64_t Co, Ci, k, s, g = 1; float eps; ss >> kind >> Co >> Ci >> k >> s >> eps; ss >> g;
+    LayerU L; L.kind = kind; L.stride = s; L.eps = eps; L.groups = g;
+    L.w = from_data({Co, Ci, k, k}, get(ni++), true);
+    if (kind == 1) {
+      L.gamma = from_data({Co}, get(ni++), true);
+      L.beta  = from_data({Co}, get(ni++), true);
+      L.rm = get(ni++); L.rv = get(ni++);
+    } else { L.b = from_data({Co}, get(ni++), true); }
+    p.layers.push_back(std::move(L));
+  }
+  return p;
+}
+
 inline Tensor applyU(const Tensor& x, LayerU& L, bool tr) {
   int64_t pad = L.w->shape[2] / 2;
   if (L.kind == 1) {

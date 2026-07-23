@@ -198,4 +198,14 @@ inline std::vector<Tensor> load_pt_module(const std::string& path, const std::st
   std::vector<Tensor> out; walk_module(z, *m, "", out); return out;
 }
 
+// state_dict nested under a top-level key, e.g. a YOLOX/Megvii checkpoint
+// {'model': OrderedDict[str -> Tensor], 'optimizer': ...}. Returns [] if the key is
+// absent or not a dict of tensors (so callers can fall through to other readers).
+inline std::vector<Tensor> load_pt_state_under(const std::string& path, const std::string& key) {
+  Zip z; z.open(path); auto pk = z.find("data.pkl"); Val top = run_pickle(z.B + pk.first, pk.second);
+  const Val* m = get_item(top, key); std::vector<Tensor> out;
+  if (m) for (auto& kv : m->items) if (kv.first.t == Val::S && kv.second.t == Val::TEN && kv.second.tdt != 2) out.push_back(read_storage(z, kv.second, kv.first.s));
+  return out;
+}
+
 }  // namespace pt

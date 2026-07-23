@@ -24,6 +24,7 @@ int main(int argc, char** argv) {
   std::string trainL = argc>1?argv[1]:"pure/ref/data_synth/list.txt";
   std::string valL   = argc>2?argv[2]:"pure/ref/data_synth/val.txt";
   int EPOCHS = argc>3?atoi(argv[3]):8, BATCH = argc>4?atoi(argv[4]):4;
+  std::string initpt = argc>5?argv[5]:"";
   const std::string DU = "pure/ref/data_unf/";
 
   Dataset tr = read_dataset(trainL), va = read_dataset(valL);
@@ -32,7 +33,9 @@ int main(int argc, char** argv) {
   printf("train=%zu val=%zu imgsz=%lld batch=%d epochs=%d  (BD=%lld DW=%lld)\n",
          tr.items.size(), va.items.size(), (long long)S, BATCH, EPOCHS, (long long)BD, (long long)DWF);
 
-  auto prov = load_unfused(DU);
+  // initial weights: from the init .pt (pure-C++ read, arch from the tiny manifest) if one
+  // is given and exists, else from the Python-exported .bin files.
+  ProviderU prov; { std::ifstream t(initpt); if (!initpt.empty() && t.good()) { printf("init weights <- %s (pure C++)\n", initpt.c_str()); prov = load_unfused_pt(DU, initpt); } else prov = load_unfused(DU); }
   std::vector<Tensor> params;
   for (auto& L : prov.layers) { params.push_back(L.w); if (L.kind==1){params.push_back(L.gamma);params.push_back(L.beta);} else params.push_back(L.b); }
   Adam opt(params, 2e-3f, 0.9f, 0.999f, 1e-8f, 5e-4f, false);

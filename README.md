@@ -51,6 +51,50 @@ assets/bus.jpg  810x1080          assets/zidane.jpg  1280x720
 ```
 (YOLOX-tiny, shipped `weights/yolox_tiny/`; decode + NMS in `pure/infer_yolox.hpp`.)
 
+## Train with zero Python — the full loop in C++
+
+`pure/train_cli.cpp` is a real training environment, pure C++, **no Python at run time**:
+dataset scan → shuffled mini-batches (hflip + brightness augmentation) over epochs →
+per-image **SimOTA** → YOLOX loss → Adam (warmup + cosine LR + weight decay) →
+**per-epoch validation mAP@0.5** → save `best.pt` / `last.pt` via the pure-C++ `.pt` writer.
+
+```sh
+cl /std:c++20 /O2 /EHsc /Ipure\third_party pure\make_init_pt.cpp   # or g++ ...
+cl /std:c++20 /O2 /EHsc /Ipure\third_party pure\train_cli.cpp
+
+./make_init_pt init.pt from yolox_tiny.pth     # C++ builds the initial-weights .pt (see below)
+./train_cli pure/ref/data_synth/list.txt pure/ref/data_synth/val.txt 16 4 init.pt
+#   epoch  1/16  loss 7.14  val mAP@0.5 0.000
+#   epoch 13/16  loss 1.53  val mAP@0.5 1.000   -> best.pt / last.pt (pure C++)
+```
+
+The C++-trained `best.pt` loads straight back into the YOLOX reference model
+(`model.load_state_dict(torch.load('best.pt'))`, 0 unexpected keys) and detects the right
+classes. Checkpoint keys are paired by **name** via `names.txt` (the engine's CSP emit
+order differs from the module `state_dict` order).
+
+### Make the initial-weights `.pt` in C++ — no Python, no YOLOX repo
+
+`pure/make_init_pt.cpp` writes a valid `state_dict` `.pt` entirely in C++, driven only by
+two tiny text files that ship in the repo — `pure/ref/data_unf/manifest_unfused.txt`
+(per-layer shapes) and `names.txt` (state_dict keys). No Python, no libtorch, **and none of
+the Megvii YOLOX package / `loguru` / `tabulate` / `thop`** that the Python export path pulls in:
+
+- **`rand`** — He/Kaiming random init, fully self-contained (no pretrained file, no Python).
+  Loads into YOLOX-tiny (0 unexpected). Trains mechanically, but from-scratch convergence
+  needs real data volume + many epochs.
+- **`from <yolox_tiny.pth>`** — copies pretrained values read in C++ by `ptio`. It handles a
+  plain state_dict, a raw `{'model': nn.Module}` checkpoint, **and the Megvii layout
+  `{'model': OrderedDict[str→Tensor], ...}`** (`load_pt_state_under`). The only input is the
+  `.pth` file itself (just download it). Verified to reproduce the fine-tune run exactly
+  (val mAP@0.5 → 1.000 by epoch 13).
+
+`train_cli` starts from that init `.pt` (`load_unfused_pt` in `pure/net_yolox_unfused.hpp`,
+arch from the manifest, tensors looked up by `names.txt` key) when it's given and present,
+else from the `.bin` export. So a fresh clone bootstraps and trains with **zero Python**:
+`make_init_pt` → `init.pt` → `train_cli`. (`python pure/ref/make_synth.py 96 24` is the one
+Python touch, only to fabricate the demo images.)
+
 ## Build (engine self-test, no deps)
 ```sh
 g++ -std=c++20 -O2 -fopenmp pure/gradcheck2.cpp -o gc2 && ./gc2   # incl. Focus
