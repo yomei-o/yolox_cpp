@@ -83,6 +83,11 @@ per grid cell (gx,gy) at stride s:
   drops them into a YOLOX model (canonical `yolox_walk` order) → `torch.save({"model":...})`
   → re-loads with 0 missing/unexpected keys and runs. Train BN in eval (running stats frozen)
   so they round-trip unchanged.
+- ONNX export/import  — ✅ done. `onnx_export_yolox.cpp` writes `yolox_tiny.onnx` (opset 13,
+  hand-rolled protobuf, 264 nodes) — **Focus = 4 strided Slice (axes[2,3] step2) + Concat**.
+  onnxruntime runs it == pure forward (~9e-5, `ref/onnx_verify_yolox.py`). `m_onnx_run.cpp`
+  parses & runs the .onnx graph-driven in the pure engine (~1.8e-4). Added `slice_hw` op
+  (strided spatial slice) + extended onnx_run Slice to handle axes[2,3]/steps.
 
 ## Gotchas to remember
 - export must **force CPU** (`.cpu()`) — torch.hub loads to GPU on GPU hosts (learned on v5).

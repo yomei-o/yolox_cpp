@@ -16,6 +16,12 @@ YOLOX is the most different of the family: **anchor-free with a decoupled head**
 - ✅ M2: loss — **SimOTA** (plain, no-grad) == YOLOX `get_assignments`; IoU/BCE forward 1.9e-6, **grads 3e-8** vs PyTorch.
 - ✅ M3: **end-to-end training** (`m3_train.cpp`, forward→SimOTA→loss→backward→SGD) — loss 24.1→3.2.
 
+- ✅ **.pt write-back**: train unfused conv+BN in C++ → drop into a standard YOLOX `.pt`
+  (re-loads with 0 missing/unexpected keys, runs). `net_yolox_unfused.hpp` + `ref/writeback_yolox.py`.
+- ✅ **ONNX export/import**: `onnx_export_yolox.cpp` writes `yolox_tiny.onnx` (Focus = strided
+  Slice + Concat) — onnxruntime-verified (~9e-5); `m_onnx_run.cpp` runs a `.onnx` graph-driven
+  in the pure engine (~1.8e-4). Hand-rolled protobuf, no deps.
+
 conv routes through the single-header `bk::` device seam, so `nvcc -DUSE_CUDA` trains on a
 real GPU (verified for the sibling repos on a Colab T4).
 

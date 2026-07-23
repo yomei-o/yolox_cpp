@@ -339,6 +339,21 @@ inline Tensor slice_ch(const Tensor& x, int64_t c0, int64_t c1) {
   return o;
 }
 
+// strided spatial slice: x[:,:, hs::hstep, ws::wstep]. (one Focus patch / ONNX Slice)
+inline Tensor slice_hw(const Tensor& x, int64_t hs, int64_t ws, int64_t hstep, int64_t wstep) {
+  int64_t N=x->shape[0], C=x->shape[1], H=x->shape[2], W=x->shape[3];
+  int64_t OH=(H-hs+hstep-1)/hstep, OW=(W-ws+wstep-1)/wstep;
+  auto o=make_tensor({N,C,OH,OW},true);
+  for (int64_t n=0;n<N;++n) for (int64_t c=0;c<C;++c) for (int64_t i=0;i<OH;++i) for (int64_t j=0;j<OW;++j)
+    o->data[((n*C+c)*OH+i)*OW+j] = x->data[((n*C+c)*H+(hs+i*hstep))*W+(ws+j*wstep)];
+  o->parents={x}; Node* op=o.get();
+  o->backward_fn=[x,op,N,C,H,W,OH,OW,hs,ws,hstep,wstep]{
+    for (int64_t n=0;n<N;++n) for (int64_t c=0;c<C;++c) for (int64_t i=0;i<OH;++i) for (int64_t j=0;j<OW;++j)
+      x->grad[((n*C+c)*H+(hs+i*hstep))*W+(ws+j*wstep)] += op->grad[((n*C+c)*OH+i)*OW+j];
+  };
+  return o;
+}
+
 // Focus (space-to-depth): (N,C,H,W) -> (N,4C,H/2,W/2). Channel block order matches
 // YOLOX: [top-left, bottom-left, top-right, bottom-right] = [(::2,::2),(1::2,::2),(::2,1::2),(1::2,1::2)].
 inline Tensor focus(const Tensor& x) {
