@@ -13,7 +13,7 @@ int main() {
   const std::string DU = "pure/ref/data_unf/", DW = "pure/ref/data_wb/";
   const int64_t IMG = 64, NC = 80;
   auto prov = load_unfused(DU);
-  int64_t BD=1; { std::ifstream f(DU+"io.txt"); int64_t im; f>>im>>BD; }
+  int64_t BD=1, DWF=0; { std::ifstream f(DU+"io.txt"); int64_t im; f>>im>>BD>>DWF; }
   std::vector<Tensor> params;
   for (auto& L : prov.layers) { params.push_back(L.w);
     if (L.kind==1){ params.push_back(L.gamma); params.push_back(L.beta);} else params.push_back(L.b); }
@@ -29,7 +29,7 @@ int main() {
   printf("iter | total\n");
   for (int it=0; it<=40; ++it) {
     prov.i=0;
-    auto raw = yolox_forward_unfused(img, prov, false, BD);   // BN eval: freeze running stats
+    auto raw = yolox_forward_unfused(img, prov, false, BD, (bool)DWF);   // BN eval: freeze running stats
     auto L = yolox_loss(raw, xs, ys, st, gtb, gtc, A, NC, G);
     backward(L.total);
     for (auto& p: params) for (int64_t i=0;i<p->numel();++i) p->data[i]-=lr*p->grad[i];

@@ -39,8 +39,9 @@ inline std::map<std::string, Tensor> run_onnx(const Graph& g, const Tensor& x) {
     if (op == "Conv") {
       Tensor w = get(nd.input[1]);
       Tensor b = (nd.input.size() >= 3 && !nd.input[2].empty()) ? get(nd.input[2]) : nullptr;
-      int64_t stride = attr_i0(nd, "strides", 1), pad = attr_i0(nd, "pads", 0);
-      y = conv2d(get(nd.input[0]), w, b, stride, pad);
+      int64_t stride = attr_i0(nd, "strides", 1), pad = attr_i0(nd, "pads", 0), grp = attr_i0(nd, "group", 1);
+      y = (grp > 1) ? dwconv2d(get(nd.input[0]), w, b, stride, pad)
+                    : conv2d(get(nd.input[0]), w, b, stride, pad);
     } else if (op == "Sigmoid") {
       y = sigmoid(get(nd.input[0]));
     } else if (op == "Mul") {

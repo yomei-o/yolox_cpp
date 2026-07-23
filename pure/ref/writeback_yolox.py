@@ -15,6 +15,10 @@ for i in range(3):
     mods += [head.stems[i], head.cls_convs[i][0], head.cls_convs[i][1],
              head.reg_convs[i][0], head.reg_convs[i][1],
              head.cls_preds[i], head.reg_preds[i], head.obj_preds[i]]
+_flat = []
+for _mm in mods:
+    _flat += [_mm.dconv, _mm.pconv] if hasattr(_mm, "dconv") else [_mm]
+mods = _flat
 
 def load_(p, a):
     with torch.no_grad(): p.copy_(torch.from_numpy(a.astype(np.float32)).reshape(p.shape))

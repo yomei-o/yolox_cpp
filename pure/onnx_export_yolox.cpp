@@ -9,7 +9,7 @@ using namespace onx;
 int main() {
   const std::string D = "pure/ref/data_net/";
   auto prov = load_net(D);
-  int64_t IMG, BD; { std::ifstream f(D+"io.txt"); f >> IMG >> BD; }
+  int64_t IMG, BD, DW=0; { std::ifstream f(D+"io.txt"); f >> IMG >> BD >> DW; }
   const int64_t NC = 80, RM = 16;   // yolox reg=4 raw (no DFL); 85 = 4+1+80
 
   Graph g; g.opset = 13;
@@ -26,7 +26,7 @@ int main() {
     n.attr.push_back({"kernel_shape",A_INTS,0,0,"",{k,k},{}});
     n.attr.push_back({"strides",A_INTS,0,0,"",{c.stride,c.stride},{}});
     n.attr.push_back({"pads",A_INTS,0,0,"",{pad,pad,pad,pad},{}});
-    n.attr.push_back({"group",A_INT,1,0,"",{},{}});
+    n.attr.push_back({"group",A_INT,c.groups,0,"",{},{}});
     g.nodes.push_back(n);
     if (!c.act) return yn;
     std::string sn=uniq("sig"), mn=uniq("silu");
@@ -71,9 +71,10 @@ int main() {
     };
     return concat({sl(0,0), sl(1,0), sl(0,1), sl(1,1)});
   };
+  auto conv3x3 = [&](const std::string& x) -> std::string { if (DW) { std::string h=conv(x); return conv(h); } return conv(x); };
   auto csp = [&](const std::string& x, int64_t n, bool sc) -> std::string {
     std::string a=conv(x), b=conv(x);
-    for (int64_t i=0;i<n;++i){ std::string h=conv(a); h=conv(h); a = sc? add(h,a): h; }
+    for (int64_t i=0;i<n;++i){ std::string h=conv(a); h=conv3x3(h); a = sc? add(h,a): h; }
     return conv(concat({a,b}));
   };
   auto spp = [&](const std::string& x) -> std::string {
@@ -83,24 +84,24 @@ int main() {
 
   // topology (mirror net_yolox.hpp)
   std::string x = conv(focus("images"));
-  x = conv(x); x = csp(x,BD,true);
-  x = conv(x); std::string c3 = csp(x,3*BD,true);
-  x = conv(c3); std::string c4 = csp(x,3*BD,true);
-  x = conv(c4); x = spp(x); std::string c5 = csp(x,BD,false);
+  x = conv3x3(x); x = csp(x,BD,true);
+  x = conv3x3(x); std::string c3 = csp(x,3*BD,true);
+  x = conv3x3(c3); std::string c4 = csp(x,3*BD,true);
+  x = conv3x3(c4); x = spp(x); std::string c5 = csp(x,BD,false);
   std::string fpn0 = conv(c5);
   std::string u = resize2x(fpn0);
   std::string p4 = csp(concat({u,c4}),BD,false);
   std::string red = conv(p4);
   std::string u2 = resize2x(red);
   std::string pan2 = csp(concat({u2,c3}),BD,false);
-  std::string d0 = conv(pan2);
+  std::string d0 = conv3x3(pan2);
   std::string pan1 = csp(concat({d0,red}),BD,false);
-  std::string d1 = conv(pan1);
+  std::string d1 = conv3x3(pan1);
   std::string pan0 = csp(concat({d1,fpn0}),BD,false);
   std::string pans[3] = {pan2, pan1, pan0};
   for (int i=0;i<3;++i) {
     std::string st=conv(pans[i]);
-    std::string cf=conv(conv(st)), rf=conv(conv(st));
+    std::string cf=conv3x3(conv3x3(st)), rf=conv3x3(conv3x3(st));
     std::string cls=conv(cf), reg=conv(rf), obj=conv(rf);
     std::string on = "out"+std::to_string(i);
     g.nodes.push_back({"Concat",uniq("oc"),{reg,obj,cls},{on},{}});   // [reg,obj,cls]=85

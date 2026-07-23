@@ -95,8 +95,9 @@ per grid cell (gx,gy) at stride s:
   base_depth = round(dep_mul*3): tiny/s = 1, m = 2, l = 3, x = 4.
 - ✅ **t/s/m/l/x** covered by the depth-parameterized net (t/s/m verified forward-parity;
   l/x same code path, just export their weights: `export_yolox.py <img> yolox_l`).
-- ⏳ **nano**: uses **depthwise (grouped) conv** — needs grouped conv in the engine
-  (v11 has it) + DWConv variants of BaseConv/Bottleneck. Not yet.
+- ✅ **nano**: depthwise. Added `dwconv2d` op; ConvW/LayerU carry `groups`; conv_apply/applyU
+  dispatch dwconv2d when groups>1; `conv3x3(dw)` consumes DWConv (dconv+pconv) at every 3x3.
+  forward + .pt write-back + ONNX export/import all verified (fwd ~1e-4, onnx ~2e-4).
 
 ## Gotchas to remember
 - export must **force CPU** (`.cpu()`) — torch.hub loads to GPU on GPU hosts (learned on v5).
