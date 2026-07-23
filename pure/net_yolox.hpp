@@ -30,6 +30,23 @@ inline Provider load_net(const std::string& D) {
   }
   return p;
 }
+// Load fused weights from a packed blob (manifest.txt + weights.bin), so inference runs
+// from a checkout without a Python export step. Blob = [w0][b0][w1][b1]... in order.
+inline Provider load_net_blob(const std::string& D) {
+  std::ifstream f(D + "manifest.txt"); std::string h; std::getline(f, h); int n = std::stoi(h);
+  std::vector<float> blob = rd(D + "weights.bin");
+  Provider p; size_t off = 0;
+  for (int i = 0; i < n; ++i) {
+    std::string line; std::getline(f, line); std::istringstream ss(line);
+    int64_t Co, Ci, k, s, act, g = 1; ss >> Co >> Ci >> k >> s >> act; ss >> g;
+    int64_t wn = Co * Ci * k * k;
+    ConvW c; c.stride = s; c.act = act; c.groups = g;
+    c.w = from_data({Co, Ci, k, k}, std::vector<float>(blob.begin()+off, blob.begin()+off+wn)); off += wn;
+    c.b = from_data({Co}, std::vector<float>(blob.begin()+off, blob.begin()+off+Co)); off += Co;
+    p.convs.push_back(c);
+  }
+  return p;
+}
 inline Tensor conv_apply(const Tensor& x, ConvW& c) {
   int64_t pad = c.w->shape[2] / 2;
   auto y = (c.groups > 1) ? dwconv2d(x, c.w, c.b, c.stride, pad) : conv2d(x, c.w, c.b, c.stride, pad);

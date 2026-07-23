@@ -30,3 +30,5 @@ __pycache__/
 !yolov8n.pt
 !weights/yolov8n/weights.bin
 *.pth
+!weights/
+!weights/**
