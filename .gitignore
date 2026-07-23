@@ -1,0 +1,31 @@
+# build / binaries
+build/
+*.exe
+*.obj
+*.lib
+*.exp
+*.pdb
+*.o
+
+# generated data & model artifacts
+data/
+out/
+scratch/
+pure/ref/data/
+pure/ref/data_*/
+pure/ref/assets/
+*.bin
+*.onnx
+*.torchscript
+*.pt
+
+# demo output images (repo root)
+/out*.png
+/*.png
+
+# python
+__pycache__/
+
+# shipped weights / model / demo assets (committed despite the patterns above)
+!yolov8n.pt
+!weights/yolov8n/weights.bin
