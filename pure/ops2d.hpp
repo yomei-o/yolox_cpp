@@ -116,6 +116,24 @@ inline Tensor log_softmax_rows(const Tensor& a) {
       for(int64_t c=0;c<C;++c){ float y=std::exp(op->data[r*C+c]); a->grad[r*C+c]+=op->grad[r*C+c]-y*(float)gsum; } } };
   return o;
 }
+// gather whole rows by (constant) index: a (R,C), idx (n) -> (n,C)
+inline Tensor gather_rows(const Tensor& a, const std::vector<int64_t>& idx) {
+  int64_t C = last_dim(a); int64_t n = (int64_t)idx.size();
+  auto o = make_tensor({n, C}, true);
+  for (int64_t k=0;k<n;++k) for (int64_t c=0;c<C;++c) o->data[k*C+c]=a->data[idx[k]*C+c];
+  o->parents={a}; Node* op=o.get();
+  o->backward_fn=[a,op,idx,C,n]{ for(int64_t k=0;k<n;++k) for(int64_t c=0;c<C;++c) a->grad[idx[k]*C+c]+=op->grad[k*C+c]; };
+  return o;
+}
+// slice columns [c0,c1): a (R,C) -> (R, c1-c0)
+inline Tensor narrow_cols(const Tensor& a, int64_t c0, int64_t c1) {
+  int64_t C=last_dim(a), R=a->numel()/C, W=c1-c0;
+  auto sh=a->shape; sh.back()=W; auto o=make_tensor(sh,true);
+  for(int64_t r=0;r<R;++r) for(int64_t j=0;j<W;++j) o->data[r*W+j]=a->data[r*C+c0+j];
+  o->parents={a}; Node* op=o.get();
+  o->backward_fn=[a,op,R,C,c0,W]{ for(int64_t r=0;r<R;++r) for(int64_t j=0;j<W;++j) a->grad[r*C+c0+j]+=op->grad[r*W+j]; };
+  return o;
+}
 // gather one column per row by (constant) index -> (rows,1)
 inline Tensor gather_row(const Tensor& a, const std::vector<int64_t>& idx) {
   int64_t C=last_dim(a), R=a->numel()/C;

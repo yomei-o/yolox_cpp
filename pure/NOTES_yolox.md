@@ -67,7 +67,13 @@ per grid cell (gx,gy) at stride s:
 - M0 oracle + blueprint + Focus op  — ✅ done
 - M1 forward parity (net_yolox.hpp + export_yolox.py, CPU-forced) vs torch  — ✅ done
   (L0 1.8e-4 / L1 4e-5 / L2 1.9e-5). `pure/m1_forward.cpp`, debug `pure/m_dbg.cpp`.
-- M2 loss: SimOTA (plain) + IoU/BCE (fwd+bwd) vs torch
+- M2 loss: SimOTA (plain) + IoU/BCE (fwd+bwd) vs torch  — ✅ done
+  - M2a `simota.hpp` + `m2a_simota.cpp`: SimOTA == YOLOX get_assignments (num_fg/fg_mask/
+    matched_gt/matched_cls/pred_ious all exact). M2b `yolox_loss.hpp` + `m2b_loss.cpp`:
+    loss fwd 1.9e-6, grads 3e-8 vs PyTorch. Targets treated as constants (soft cls label
+    = onehot*pred_iou detached; forward value identical to YOLOX get_losses).
+  - loss formulas: IoU loss = 1-iou², cost = clsBCE + 3·(-log iou) + 1e6·(~center1.5),
+    dynamic-k = int(sum(top10 iou)), reg_weight=5. bboxes_iou/IOUloss use cxcywh.
 - M3 training loop; then backend seam already present → nvcc GPU build (Colab)
 
 ## Gotchas to remember
