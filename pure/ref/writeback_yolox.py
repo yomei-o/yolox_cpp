@@ -1,10 +1,10 @@
 """A-1 write-back (yolox): drop the C++-trained weights (data_wb/) into a YOLOX model
 in the SAME canonical order, save a standard checkpoint, and verify it re-loads."""
-import os, numpy as np, torch
+import os, sys, numpy as np, torch
 HERE = os.path.dirname(os.path.abspath(__file__)); DW = os.path.join(HERE, "data_wb")
 def r(n): return np.fromfile(os.path.join(DW, n), np.float32)
 
-m = torch.hub.load("Megvii-BaseDetection/YOLOX", "yolox_tiny", pretrained=True, trust_repo=True, verbose=False).eval().cpu().float()
+m = torch.hub.load("Megvii-BaseDetection/YOLOX", (sys.argv[1] if len(sys.argv)>1 else "yolox_tiny"), pretrained=True, trust_repo=True, verbose=False).eval().cpu().float()
 head, neck, bb = m.head, m.backbone, m.backbone.backbone
 def csp(c): return [c.conv1, c.conv2] + sum([[b.conv1, b.conv2] for b in c.m], []) + [c.conv3]
 mods = [bb.stem.conv] + [bb.dark2[0]] + csp(bb.dark2[1]) + [bb.dark3[0]] + csp(bb.dark3[1]) \
@@ -38,9 +38,9 @@ for i, mod in enumerate(mods):
 print(f"serialization max|diff| = {serr:.3e}  {'OK' if serr < 1e-6 else 'FAIL'}")
 
 # save a standard YOLOX checkpoint and verify it re-loads into a fresh model
-out = os.path.join(HERE, "..", "yolox_tiny_cpp.pth")
+out = os.path.join(HERE, "..", (sys.argv[1] if len(sys.argv)>1 else "yolox_tiny")+"_cpp.pth")
 torch.save({"model": m.state_dict()}, out)
-m2 = torch.hub.load("Megvii-BaseDetection/YOLOX", "yolox_tiny", pretrained=False, trust_repo=True, verbose=False).eval().cpu().float()
+m2 = torch.hub.load("Megvii-BaseDetection/YOLOX", (sys.argv[1] if len(sys.argv)>1 else "yolox_tiny"), pretrained=False, trust_repo=True, verbose=False).eval().cpu().float()
 missing, unexpected = m2.load_state_dict(torch.load(out, map_location="cpu")["model"], strict=False)
 with torch.no_grad():
     y = m2(torch.randn(1, 3, 64, 64))

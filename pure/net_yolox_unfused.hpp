@@ -66,22 +66,22 @@ inline Tensor head_level_u(const Tensor& f, ProviderU& p, bool tr) {
   auto obj = applyU(rf, p.next(), tr);
   return concat_ch({reg, obj, cls});
 }
-inline std::vector<Tensor> yolox_forward_unfused(const Tensor& in, ProviderU& p, bool tr) {
+inline std::vector<Tensor> yolox_forward_unfused(const Tensor& in, ProviderU& p, bool tr, int64_t bd = 1) {
   auto x = bcu(focus(in), p, tr);
-  x = bcu(x, p, tr); x = csp_u(x, p, 1, true, tr);
-  x = bcu(x, p, tr); auto c3 = csp_u(x, p, 3, true, tr);
-  x = bcu(c3, p, tr); auto c4 = csp_u(x, p, 3, true, tr);
-  x = bcu(c4, p, tr); x = spp_u(x, p, tr); auto c5 = csp_u(x, p, 1, false, tr);
+  x = bcu(x, p, tr); x = csp_u(x, p, bd, true, tr);
+  x = bcu(x, p, tr); auto c3 = csp_u(x, p, 3*bd, true, tr);
+  x = bcu(c3, p, tr); auto c4 = csp_u(x, p, 3*bd, true, tr);
+  x = bcu(c4, p, tr); x = spp_u(x, p, tr); auto c5 = csp_u(x, p, bd, false, tr);
   auto fpn0 = bcu(c5, p, tr);
   auto u = upsample_nearest(fpn0, 2);
-  auto p4 = csp_u(concat_ch({u, c4}), p, 1, false, tr);
+  auto p4 = csp_u(concat_ch({u, c4}), p, bd, false, tr);
   auto red = bcu(p4, p, tr);
   auto u2 = upsample_nearest(red, 2);
-  auto pan2 = csp_u(concat_ch({u2, c3}), p, 1, false, tr);
+  auto pan2 = csp_u(concat_ch({u2, c3}), p, bd, false, tr);
   auto d0 = bcu(pan2, p, tr);
-  auto pan1 = csp_u(concat_ch({d0, red}), p, 1, false, tr);
+  auto pan1 = csp_u(concat_ch({d0, red}), p, bd, false, tr);
   auto d1 = bcu(pan1, p, tr);
-  auto pan0 = csp_u(concat_ch({d1, fpn0}), p, 1, false, tr);
+  auto pan0 = csp_u(concat_ch({d1, fpn0}), p, bd, false, tr);
   std::vector<Tensor> out;
   for (auto& f : {pan2, pan1, pan0}) out.push_back(head_level_u(f, p, tr));
   return out;

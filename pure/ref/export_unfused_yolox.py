@@ -4,8 +4,10 @@ forward (BN eval) to verify the unfused net. CPU-forced."""
 import os, sys, torch, torch.nn as nn
 HERE = os.path.dirname(os.path.abspath(__file__)); D = os.path.join(HERE, "data_unf"); os.makedirs(D, exist_ok=True)
 IMG = int(sys.argv[1]) if len(sys.argv) > 1 else 64
+MODEL = sys.argv[2] if len(sys.argv) > 2 else "yolox_tiny"
 
-m = torch.hub.load("Megvii-BaseDetection/YOLOX", "yolox_tiny", pretrained=True, trust_repo=True, verbose=False).eval().cpu().float()
+m = torch.hub.load("Megvii-BaseDetection/YOLOX", MODEL, pretrained=True, trust_repo=True, verbose=False).eval().cpu().float()
+BD = len(m.backbone.backbone.dark2[1].m)
 head, neck, bb = m.head, m.backbone, m.backbone.backbone
 NC = head.num_classes
 
@@ -47,5 +49,5 @@ with torch.no_grad():
         out = torch.cat([head.reg_preds[i](rf), head.obj_preds[i](rf), head.cls_preds[i](cf)], 1)
         save(f"ref_L{i}.bin", out)
 save("x.bin", x)
-open(os.path.join(D, "io.txt"), "w").write(f"{IMG}\n" + "\n".join(f"{int(IMG//s)} {int(IMG//s)} {int(s)}" for s in head.strides) + "\n")
+open(os.path.join(D, "io.txt"), "w").write(f"{IMG} {BD}\n" + "\n".join(f"{int(IMG//s)} {int(IMG//s)} {int(s)}" for s in head.strides) + "\n")
 print(f"unfused: {len(mods)} layers, img {IMG}")
