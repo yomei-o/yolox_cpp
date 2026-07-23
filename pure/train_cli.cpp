@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
   ProviderU prov; { std::ifstream t(initpt); if (!initpt.empty() && t.good()) { printf("init weights <- %s (pure C++)\n", initpt.c_str()); prov = load_unfused_pt(DU, initpt); } else prov = load_unfused(DU); }
   std::vector<Tensor> params;
   for (auto& L : prov.layers) { params.push_back(L.w); if (L.kind==1){params.push_back(L.gamma);params.push_back(L.beta);} else params.push_back(L.b); }
-  Adam opt(params, 2e-3f, 0.9f, 0.999f, 1e-8f, 5e-4f, false);
+  Adam opt(params, 1e-3f, 0.9f, 0.999f, 1e-8f, 5e-4f, false);
 
   // anchors (grid col/row index per level), strides 8/16/32 for imgsz S
   struct Lv { int64_t h,w; float s; }; std::vector<Lv> lv = {{S/8,S/8,8.f},{S/16,S/16,16.f},{S/32,S/32,32.f}};
@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
       }
       auto mbmean = mul_scalar(mb, 1.f/std::max(1,cnt));
       backward(mbmean);
-      opt.lr = cosine_lr(gstep, total, 2e-3f, std::max(1, total/20)); opt.step(); opt.zero_grad(); ++gstep;
+      opt.lr = cosine_lr(gstep, total, 1e-3f, std::max(1, total/20)); opt.step(); opt.zero_grad(); ++gstep;
       eloss += mbmean->data[0]; ++nb;
     }
     double m50 = validate();

@@ -146,7 +146,9 @@ static int cmd_train(const Args& a) {
          (int)baseAug.mosaic, (int)baseAug.mixup, closeMosaic);
 
   std::vector<Tensor> params; for (auto& L : prov.layers) { params.push_back(L.w); if (L.kind==1){params.push_back(L.gamma);params.push_back(L.beta);} else params.push_back(L.b); }
-  Adam opt(params, 2e-3f, 0.9f, 0.999f, 1e-8f, 5e-4f, false);
+  float lr0 = a.getf("lr", 1e-3f);                    // fine-tune default; 2e-3 destroys pretrained
+  int warmup = a.geti("warmup", std::max(1, ((int)tr.items.size()+BATCH-1)/BATCH));  // ~1 epoch
+  Adam opt(params, lr0, 0.9f, 0.999f, 1e-8f, 5e-4f, false);
   std::vector<float> xs,ys,st; grids(S, xs, ys, st); int64_t A = (int64_t)xs.size();
 
   std::vector<std::string> names; { std::ifstream f(DU + "names.txt"); std::string s; while (f >> s) names.push_back(s); }
@@ -176,7 +178,7 @@ static int cmd_train(const Args& a) {
       }
       auto mbmean = mul_scalar(mb, 1.f/std::max(1,cnt));
       backward(mbmean);
-      opt.lr = cosine_lr(gstep, total, 2e-3f, std::max(1,total/20)); opt.step(); opt.zero_grad(); ++gstep;
+      opt.lr = cosine_lr(gstep, total, lr0, warmup); opt.step(); opt.zero_grad(); ++gstep;
       eloss += mbmean->data[0]; ++nb;
     }
     Dataset vac = va; double m50 = run_val(vac, prov, BD, DWF, S, evalConf);
