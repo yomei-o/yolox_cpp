@@ -11,6 +11,9 @@
 #include <cstdio>
 
 #ifdef USE_CUDA
+  #ifdef USE_CUBLAS
+    #include <cublas_v2.h>        // include FIRST (before anything pulls cuda_fp16 in a bad state)
+  #endif
   #include <cuda_runtime.h>
   #define BK_HD __host__ __device__
   #define BK_CHECK(x) do { cudaError_t e_=(x); if (e_) { \
@@ -84,26 +87,49 @@ inline void sync() {}
 //   gemm_nt : C(M,N) = A(M,Kc)  * B(N,Kc)^T              (NT) — conv dW = dO * col^T
 //   gemm_tn : C(M,N) = A(Kc,M)^T* B(Kc,N)               (TN) — conv dcol = W^T * dO
 #ifdef USE_CUDA
+// Optional cuBLAS fast path (build with -DUSE_CUBLAS -lcublas). cuBLAS is column-major; our
+// buffers are row-major, so each row-major GEMM maps to a cuBLAS call computing Cᵀ = ... :
+//   C=A·B      -> sgemm(N,N, N,M,K,  B(ld N), A(ld K), C(ld N))
+//   C=A·Bᵀ(nt) -> sgemm(T,N, N,M,Kc, B(ld Kc), A(ld Kc), C(ld N))
+//   C=Aᵀ·B(tn) -> sgemm(N,T, N,M,Kc, B(ld N),  A(ld M),  C(ld N))
+#ifdef USE_CUBLAS
+inline cublasHandle_t bk_cublas() { static cublasHandle_t h = nullptr; if (!h) cublasCreate(&h); return h; }
+#endif
 inline void gemm(const float* A, const float* B, float* C, int64_t M, int64_t K, int64_t N, float beta = 0.f) {
+#ifdef USE_CUBLAS
+  float alpha = 1.f;
+  cublasSgemm(bk_cublas(), CUBLAS_OP_N, CUBLAS_OP_N, (int)N, (int)M, (int)K, &alpha, B, (int)N, A, (int)K, &beta, C, (int)N);
+#else
   bk::parallel_for(M * N, [=] BK_HD (int64_t idx) {
     int64_t m = idx / N, n = idx % N; float s = 0.f;
     for (int64_t k = 0; k < K; ++k) s += A[m * K + k] * B[k * N + n];
     C[idx] = s + (beta == 0.f ? 0.f : beta * C[idx]);
   });
+#endif
 }
 inline void gemm_nt(const float* A, const float* B, float* C, int64_t M, int64_t N, int64_t Kc, float beta = 0.f) {
+#ifdef USE_CUBLAS
+  float alpha = 1.f;
+  cublasSgemm(bk_cublas(), CUBLAS_OP_T, CUBLAS_OP_N, (int)N, (int)M, (int)Kc, &alpha, B, (int)Kc, A, (int)Kc, &beta, C, (int)N);
+#else
   bk::parallel_for(M * N, [=] BK_HD (int64_t idx) {
     int64_t m = idx / N, n = idx % N; const float* ar = A + m * Kc; const float* br = B + n * Kc;
     float s = 0.f; for (int64_t k = 0; k < Kc; ++k) s += ar[k] * br[k];
     C[idx] = s + (beta == 0.f ? 0.f : beta * C[idx]);
   });
+#endif
 }
 inline void gemm_tn(const float* A, const float* B, float* C, int64_t M, int64_t N, int64_t Kc, float beta = 0.f) {
+#ifdef USE_CUBLAS
+  float alpha = 1.f;
+  cublasSgemm(bk_cublas(), CUBLAS_OP_N, CUBLAS_OP_T, (int)N, (int)M, (int)Kc, &alpha, B, (int)N, A, (int)M, &beta, C, (int)N);
+#else
   bk::parallel_for(M * N, [=] BK_HD (int64_t idx) {
     int64_t m = idx / N, n = idx % N; float s = 0.f;
     for (int64_t k = 0; k < Kc; ++k) s += A[k * M + m] * B[k * N + n];
     C[idx] = s + (beta == 0.f ? 0.f : beta * C[idx]);
   });
+#endif
 }
 #else
 inline void gemm(const float* A, const float* B, float* C, int64_t M, int64_t K, int64_t N, float beta = 0.f) {
