@@ -132,36 +132,56 @@ inline void dcol2im(const float* dcol, int64_t Cin, int64_t H, int64_t W, int64_
   });
 }
 // in (N,Cin,H,W), w (Cout,Cin,kh,kw), bias (Cout) or null. groups=1.
-inline DT dconv2d(DT in, DT w, DT bias, int64_t stride, int64_t pad) {
+inline DT dconv2d(DT in, DT w, DT bias, int64_t stride, int64_t pad, int64_t groups = 1) {
   int64_t N = in->shape[0], Cin = in->shape[1], H = in->shape[2], Wd = in->shape[3];
-  int64_t Cout = w->shape[0], kh = w->shape[2], kw = w->shape[3];
+  int64_t Cout = w->shape[0], Cig = w->shape[1], kh = w->shape[2], kw = w->shape[3];   // Cig=Cin/groups
   int64_t OH = (H + 2*pad - kh)/stride + 1, OW = (Wd + 2*pad - kw)/stride + 1;
-  int64_t K = Cin*kh*kw, P = OH*OW;
+  int64_t Cog = Cout/groups, Kg = Cig*kh*kw, P = OH*OW;                                  // per-group sizes
   DT o = dmake({N, Cout, OH, OW});
-  { thrust::device_vector<float> col(K*P); float* colp = thrust::raw_pointer_cast(col.data());
-    for (int64_t n = 0; n < N; ++n) {
-      dim2col(in->dp() + n*Cin*H*Wd, Cin, H, Wd, kh, kw, OH, OW, stride, pad, colp);
-      bk::gemm(w->dp(), colp, o->dp() + n*Cout*P, Cout, K, P);              // O(Cout,P)=W(Cout,K)*col(K,P)
-      if (bias) { float* B = bias->dp(); float* On = o->dp() + n*Cout*P;
-        bk::parallel_for(Cout*P, [=] BK_HD (int64_t idx) { On[idx] += B[idx/P]; }); }
+  { thrust::device_vector<float> col(Kg*P); float* colp = thrust::raw_pointer_cast(col.data());
+    for (int64_t n = 0; n < N; ++n) for (int64_t g = 0; g < groups; ++g) {
+      dim2col(in->dp() + n*Cin*H*Wd + g*Cig*H*Wd, Cig, H, Wd, kh, kw, OH, OW, stride, pad, colp);
+      bk::gemm(w->dp() + g*Cog*Kg, colp, o->dp() + n*Cout*P + g*Cog*P, Cog, Kg, P);
     }
+    if (bias) { float* B = bias->dp(); float* O = o->dp();
+      bk::parallel_for(N*Cout*P, [=] BK_HD (int64_t idx) { O[idx] += B[(idx/P)%Cout]; }); }
   }
   o->parents = bias ? std::vector<DT>{in,w,bias} : std::vector<DT>{in,w};
-  o->backward_fn = [in,w,bias,N,Cin,H,Wd,Cout,kh,kw,OH,OW,stride,pad,K,P, oo=o.get()]() {
+  o->backward_fn = [in,w,bias,N,Cin,H,Wd,Cout,Cig,Cog,kh,kw,OH,OW,stride,pad,Kg,P,groups, oo=o.get()]() {
     if (bias) { float* GB = bias->gp(); float* GO = oo->gp();
       bk::parallel_for(Cout, [=] BK_HD (int64_t co) { float a = 0.f;
         for (int64_t n = 0; n < N; ++n) { const float* g = GO + (n*Cout+co)*P; for (int64_t p = 0; p < P; ++p) a += g[p]; }
         GB[co] += a; }); }
-    thrust::device_vector<float> col(K*P), dcol(K*P);
+    thrust::device_vector<float> col(Kg*P), dcol(Kg*P);
     float* colp = thrust::raw_pointer_cast(col.data()), *dcolp = thrust::raw_pointer_cast(dcol.data());
-    for (int64_t n = 0; n < N; ++n) {
-      dim2col(in->dp() + n*Cin*H*Wd, Cin, H, Wd, kh, kw, OH, OW, stride, pad, colp);
-      bk::gemm_nt(oo->gp() + n*Cout*P, colp, w->gp(), Cout, K, P, 1.f);     // dW += dO(Cout,P)*col(K,P)^T
-      bk::gemm_tn(w->dp(), oo->gp() + n*Cout*P, dcolp, K, P, Cout, 0.f);    // dcol = W^T * dO
-      dcol2im(dcolp, Cin, H, Wd, kh, kw, OH, OW, stride, pad, in->gp() + n*Cin*H*Wd);
+    for (int64_t n = 0; n < N; ++n) for (int64_t g = 0; g < groups; ++g) {
+      dim2col(in->dp() + n*Cin*H*Wd + g*Cig*H*Wd, Cig, H, Wd, kh, kw, OH, OW, stride, pad, colp);
+      bk::gemm_nt(oo->gp() + n*Cout*P + g*Cog*P, colp, w->gp() + g*Cog*Kg, Cog, Kg, P, 1.f);
+      bk::gemm_tn(w->dp() + g*Cog*Kg, oo->gp() + n*Cout*P + g*Cog*P, dcolp, Kg, P, Cog, 0.f);
+      dcol2im(dcolp, Cig, H, Wd, kh, kw, OH, OW, stride, pad, in->gp() + n*Cin*H*Wd + g*Cig*H*Wd);
     }
   };
   return o;
+}
+// Focus / space-to-depth: [B,C,H,W] -> [B,4C,H/2,W/2], blocks {0:tl,1:bl,2:tr,3:br} (yolox).
+inline DT dfocus(DT x) {
+  int64_t N=x->shape[0], C=x->shape[1], H=x->shape[2], W=x->shape[3], OH=H/2, OW=W/2;
+  DT y = dmake({N, 4*C, OH, OW}); const float* X = x->dp(); float* Y = y->dp();
+  bk::parallel_for(N*4*C*OH*OW, [=] BK_HD (int64_t idx) {
+    int64_t ow=idx%OW, t=idx/OW, oh=t%OH, t2=t/OH, cc=t2%(4*C), n=t2/(4*C);
+    int64_t blk=cc/C, c=cc%C, dr=blk&1, dc=(blk>>1)&1;                 // 0:(0,0)1:(1,0)2:(0,1)3:(1,1)
+    Y[idx] = X[((n*C+c)*H + 2*oh+dr)*W + 2*ow+dc];
+  });
+  y->parents = {x};
+  y->backward_fn = [x,N,C,H,W,OH,OW, yo=y.get()]() {
+    const float* GY = yo->gp(); float* GX = x->gp();
+    bk::parallel_for(N*C*H*W, [=] BK_HD (int64_t idx) {                 // each input elem -> one output
+      int64_t iw=idx%W, t=idx/W, ih=t%H, t2=t/H, c=t2%C, n=t2/C;
+      int64_t blk=((iw&1)<<1)|(ih&1);
+      GX[idx] += GY[((n*4*C + blk*C + c)*OH + ih/2)*OW + iw/2];
+    });
+  };
+  return y;
 }
 
 // ---- reduction: sum -> scalar ----
